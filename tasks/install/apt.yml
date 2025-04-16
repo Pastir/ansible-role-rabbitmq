@@ -1,0 +1,45 @@
+# https://www.rabbitmq.com/install-debian.html
+
+- name: Add repo key Team RabbitMQ's
+  ansible.builtin.shell: curl -1sLf "{{ rabbitmq_team_repo_keyserver_url | default(__rabbitmq_team_repo_keyserver_url) }}" | sudo gpg --dearmor > {{ rabbitmq_team_repo_keyserver_dst | default(__rabbitmq_team_repo_keyserver_dst)}}
+  become: true
+
+- name: Add Community mirror of Cloudsmith modern Erlang repository
+  ansible.builtin.shell: curl -1sLf "{{ rabbitmq_erlang_repo_keyserver_url | default(__rabbitmq_erlang_repo_keyserver_url) }}" | sudo gpg --dearmor > {{ rabbitmq_erlang_repo_keyserver_dst | default(__rabbitmq_erlang_repo_keyserver_dst) }}
+  become: true
+
+- name: Add Community mirror of Cloudsmith RabbitMQ repository
+  ansible.builtin.shell: curl -1sLf "{{ rabbitmq_rabbitmq_repo_keyserver_url | default(__rabbitmq_rabbitmq_repo_keyserver_url) }}" | sudo gpg --dearmor > {{ rabbitmq_rabbitmq_repo_keyserver_dst | default(__rabbitmq_rabbitmq_repo_keyserver_dst) }}
+  become: true
+
+- name: Template a file to /etc/apt/sources.list.d/rabbitmq.list
+  ansible.builtin.template:
+    src: "templates/rabbitmq.list.j2"
+    dest: "/etc/apt/sources.list.d/rabbitmq.list"
+    owner: root
+    group: root
+    mode: '0644'
+
+## Install packages
+- name: Install packages
+  ansible.builtin.apt:
+    name: "{{ rabbitmq_packages | default(__rabbitmq_packages) }}"
+    update_cache: yes
+
+## Install Erlang packages
+- name: Install Erlang packages
+  ansible.builtin.apt:
+    name: "{{ rabbitmq_erlang_packages | default(__rabbitmq_erlang_packages) }}"
+    update_cache: yes
+
+- name: Install rabbitmq-server and its dependencies
+  ansible.builtin.apt:
+    name: "{{ rabbitmq_server_packages | default(__rabbitmq_server_packages) }}"
+    update_cache: yes
+    state: fixed
+  notify: Restart rabbitmq-server
+
+- name: Enable service rabbitmq-server
+  ansible.builtin.systemd:
+    name: "{{ rabbitmq_daemon | default(__rabbitmq_daemon) }}"
+    enabled: yes

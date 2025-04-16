@@ -1,0 +1,48 @@
+__rabbitmq_daemon: rabbitmq-server
+__rabbitmq_state: restarted
+__rabbitmq_enabled: true
+
+__rabbitmq_version: "3.11.9-1"
+
+## Team RabbitMQ's main signing key
+__rabbitmq_team_repo_keyserver_url: "https://keys.openpgp.org/vks/v1/by-fingerprint/0A9AF2115F4687BD29803A206B73A36E6026DFCA"
+__rabbitmq_team_repo_keyserver_dst: "/usr/share/keyrings/com.rabbitmq.team.gpg"
+
+## Community mirror of Cloudsmith: modern Erlang repository
+__rabbitmq_erlang_repo_keyserver_url: "https://github.com/rabbitmq/signing-keys/releases/download/3.0/cloudsmith.rabbitmq-erlang.E495BB49CC4BBE5B.key"
+__rabbitmq_erlang_repo_keyserver_dst: "/usr/share/keyrings/rabbitmq.E495BB49CC4BBE5B.gpg"
+
+## Community mirror of Cloudsmith: RabbitMQ repository
+__rabbitmq_rabbitmq_repo_keyserver_url: "https://github.com/rabbitmq/signing-keys/releases/download/3.0/cloudsmith.rabbitmq-server.9F4587F226208342.key"
+__rabbitmq_rabbitmq_repo_keyserver_dst: "/usr/share/keyrings/rabbitmq.9F4587F226208342.gpg"
+
+__rabbitmq_users: []
+
+__rabbitmq_packages:
+  - curl
+  - gnupg
+  - apt-transport-https
+
+__rabbitmq_server_packages: rabbitmq-server
+
+# Erlang packages
+__rabbitmq_erlang_packages:
+  - erlang-base
+  - erlang-asn1
+  - erlang-crypto
+  - erlang-eldap
+  - erlang-ftp
+  - erlang-inets
+  - erlang-mnesia
+  - erlang-os-mon
+  - erlang-parsetools
+  - erlang-public-key
+  - erlang-runtime-tools
+  - erlang-syntax-tools
+  - erlang-tftp
+  - erlang-tools
+  - erlang-xmerl
+  - erlang-snmp
+  - erlang-ssl
+
+__rabbitmq_plugins_enabled: rabbitmq_management,rabbitmq_prometheus
