@@ -1,0 +1,27 @@
+#!/bin/bash
+# Managed by Ansible (pastir.rabbitmq), do not edit.
+# Exit 0 once the local node is running without alarms and every cluster member is running.
+# Usage: rabbitmq-wait-healthy [timeout-seconds]   (0 -> check once)
+set -u
+timeout="${1:-300}"
+deadline=$((SECONDS + timeout))
+
+healthy() {
+  rabbitmq-diagnostics -q check_running >/dev/null 2>&1 || return 1
+  rabbitmq-diagnostics -q check_local_alarms >/dev/null 2>&1 || return 1
+  rabbitmqctl -q cluster_status --formatter json 2>/dev/null | python3 -c '
+import json, sys
+s = json.load(sys.stdin)
+members = set(s.get("disk_nodes", [])) | set(s.get("ram_nodes", []))
+sys.exit(0 if members and members <= set(s.get("running_nodes", [])) else 1)
+'
+}
+
+until healthy; do
+  if ((SECONDS >= deadline)); then
+    echo "RabbitMQ node or cluster is not healthy after ${timeout}s" >&2
+    rabbitmqctl -q cluster_status >&2 2>&1 || true
+    exit 1
+  fi
+  sleep 5
+done

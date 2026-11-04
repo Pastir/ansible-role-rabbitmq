@@ -1,1 +1,39 @@
+---
+# Erlang series the Team RabbitMQ repository no longer builds for a release, and the release whose
+# packages install there instead (checked: Erlang 26.2.5.13 for noble on Ubuntu 26.04).
+__rabbitmq_erlang_suite_fallback:
+  resolute:
+    "25": noble
+    "26": noble
 
+__rabbitmq_release: "{{ ansible_facts['distribution_release'] }}"
+__rabbitmq_erlang_major: "{{ rabbitmq_erlang_version | regex_replace('^\\d+:', '') | regex_replace('\\..*$', '') }}"
+__rabbitmq_erlang_suite: >-
+  {{ rabbitmq_erlang_repo_suite
+     or __rabbitmq_erlang_suite_fallback[__rabbitmq_release][__rabbitmq_erlang_major] | default(__rabbitmq_release) }}
+__rabbitmq_server_suite: "{{ rabbitmq_server_repo_suite or __rabbitmq_release }}"
+
+# "3.12.14" -> "3.12.14-*", "3.12.14-1" stays; "26.2.5.13" -> "1:26.2.5.13-*".
+__rabbitmq_server_pkg_version: >-
+  {{ rabbitmq_version if '-' in rabbitmq_version else rabbitmq_version ~ '-*' }}
+__rabbitmq_erlang_pkg_version: >-
+  {{ ('' if ':' in rabbitmq_erlang_version else '1:') ~ rabbitmq_erlang_version
+     ~ ('' if '-' in rabbitmq_erlang_version else '-*') }}
+
+__rabbitmq_install_list: >-
+  {{ (rabbitmq_erlang_packages | map('regex_replace', '$', ('=' ~ __rabbitmq_erlang_pkg_version) if rabbitmq_erlang_version else '') | list)
+     + ['rabbitmq-server' ~ (('=' ~ __rabbitmq_server_pkg_version) if rabbitmq_version else '')] }}
+
+__rabbitmq_is_cluster: "{{ rabbitmq_cluster_group | length > 0 }}"
+__rabbitmq_is_seed: "{{ inventory_hostname == rabbitmq_cluster_seed }}"
+__rabbitmq_group_hosts: "{{ groups[rabbitmq_cluster_group] if __rabbitmq_is_cluster else [inventory_hostname] }}"
+# Hosts still in the play / all hosts the play started with.
+__rabbitmq_cluster_hosts: "{{ __rabbitmq_group_hosts | select('in', ansible_play_hosts) | list }}"
+__rabbitmq_cluster_hosts_all: "{{ __rabbitmq_group_hosts | select('in', ansible_play_hosts_all) | list }}"
+__rabbitmq_seed_nodename: >-
+  {{ hostvars[rabbitmq_cluster_seed].rabbitmq_nodename
+     | default('rabbit@' ~ hostvars[rabbitmq_cluster_seed].ansible_facts.hostname) }}
+
+__rabbitmq_cookie_path: /var/lib/rabbitmq/.erlang.cookie
+__rabbitmq_health_script: /usr/local/sbin/rabbitmq-wait-healthy
+__rabbitmq_pending_marker: /var/lib/rabbitmq/.ansible-restart-pending

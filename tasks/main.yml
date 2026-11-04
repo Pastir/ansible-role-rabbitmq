@@ -1,8 +1,74 @@
-- include_tasks: "install/{{ ansible_pkg_mgr }}.yml"
-  tags:
-    - install
+---
+- name: Validate input
+  ansible.builtin.assert:
+    that:
+      - rabbitmq_version is match('^(\d+\.\d+\.\d+(-\S+)?)?$')
+      - rabbitmq_erlang_version is match('^((\d+:)?\d+(\.\d+)*(-\S+)?)?$')
+      - rabbitmq_plugins is not string
+      - not __rabbitmq_is_cluster or rabbitmq_cluster_group in groups
+      - not __rabbitmq_is_cluster or inventory_hostname in groups[rabbitmq_cluster_group]
+      - not __rabbitmq_is_cluster or rabbitmq_cluster_seed in groups[rabbitmq_cluster_group]
+      - not __rabbitmq_is_cluster or rabbitmq_erlang_cookie | length >= 20
+      - rabbitmq_erlang_cookie is match('^[A-Za-z0-9]*$')
+    fail_msg: >-
+      Check rabbitmq_version ("3.12.14"), rabbitmq_erlang_version ("26.2.5.13"), rabbitmq_plugins (list),
+      rabbitmq_cluster_group/rabbitmq_cluster_seed, and rabbitmq_erlang_cookie (letters and digits,
+      at least 20 characters, required for a cluster).
+    quiet: true
+  tags: [rabbitmq, rabbitmq_install, rabbitmq_config]
 
-- name: Enables the rabbitmq_management plugin
+- name: Install RabbitMQ and Erlang
+  ansible.builtin.import_tasks: install.yml
+  tags: [rabbitmq, rabbitmq_install]
+
+- name: Erlang cookie
+  ansible.builtin.import_tasks: cookie.yml
+  tags: [rabbitmq, rabbitmq_config]
+
+- name: Configuration files
+  ansible.builtin.import_tasks: config.yml
+  tags: [rabbitmq, rabbitmq_config]
+
+# One node at a time across the play: only the host whose turn it is acts, the others skip.
+# A failed node leaves the play, and the next one refuses to start while the cluster is degraded.
+- name: Rolling upgrade / restart
+  ansible.builtin.include_tasks: rolling.yml
+  loop: "{{ __rabbitmq_cluster_hosts }}"
+  loop_control:
+    loop_var: __rabbitmq_turn
+  when: not ansible_check_mode
+  tags: [rabbitmq, rabbitmq_install, rabbitmq_config]
+
+# After the rolling step: upgrading with allow_change_held_packages clears the hold.
+- name: Hold RabbitMQ and Erlang
+  ansible.builtin.dpkg_selections:
+    name: "{{ item }}"
+    selection: hold
+  loop: "{{ rabbitmq_erlang_packages + ['rabbitmq-server'] }}"
+  when: rabbitmq_hold and not ansible_check_mode
+  tags: [rabbitmq, rabbitmq_install]
+
+- name: Report a pending restart
+  ansible.builtin.import_tasks: pending.yml
+  tags: [rabbitmq, rabbitmq_config]
+
+- name: Cluster membership
+  ansible.builtin.include_tasks: cluster.yml
+  loop: "{{ __rabbitmq_cluster_hosts }}"
+  loop_control:
+    loop_var: __rabbitmq_turn
+  when:
+    - __rabbitmq_is_cluster
+    - not ansible_check_mode
+  tags: [rabbitmq, rabbitmq_cluster]
+
+- name: Plugins
   community.rabbitmq.rabbitmq_plugin:
-    names: "{{ rabbitmq_plugins_enabled | default(__rabbitmq_plugins_enabled) }}"
+    names: "{{ rabbitmq_plugins | join(',') }}"
+    new_only: "{{ not rabbitmq_plugins_exclusive }}"
     state: enabled
+  tags: [rabbitmq, rabbitmq_config]
+
+- name: Vhosts, users, policies, feature flags
+  ansible.builtin.import_tasks: objects.yml
+  tags: [rabbitmq, rabbitmq_objects]

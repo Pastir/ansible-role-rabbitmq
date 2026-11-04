@@ -1,0 +1,42 @@
+---
+- name: Read current Erlang cookie
+  ansible.builtin.slurp:
+    src: "{{ __rabbitmq_cookie_path }}"
+  register: __rabbitmq_cookie_current
+  failed_when: false
+  no_log: true
+  when: rabbitmq_erlang_cookie | length > 0
+
+- name: Decide on the Erlang cookie
+  ansible.builtin.set_fact:
+    __rabbitmq_cookie_differs: >-
+      {{ rabbitmq_erlang_cookie | length > 0
+         and (__rabbitmq_cookie_current.content | default('') | b64decode | trim) != rabbitmq_erlang_cookie }}
+
+# The CLI and the other nodes would no longer talk to this node.
+- name: Refuse to replace the cookie of a running node
+  ansible.builtin.assert:
+    that: not __rabbitmq_installed or rabbitmq_erlang_cookie_force
+    fail_msg: >-
+      {{ __rabbitmq_cookie_path }} differs from rabbitmq_erlang_cookie. Changing it disconnects the node
+      from its cluster; set rabbitmq_erlang_cookie_force: true to replace it (the node is restarted).
+    quiet: true
+  when: __rabbitmq_cookie_differs
+
+# A running node keeps the old cookie in memory; stop it, the rolling step starts it again.
+- name: Replace the Erlang cookie
+  when: __rabbitmq_cookie_differs
+  block:
+    - name: Stop RabbitMQ before replacing the cookie
+      ansible.builtin.systemd_service:
+        name: rabbitmq-server
+        state: stopped
+
+    - name: Write Erlang cookie
+      ansible.builtin.copy:
+        dest: "{{ __rabbitmq_cookie_path }}"
+        content: "{{ rabbitmq_erlang_cookie }}"
+        owner: rabbitmq
+        group: rabbitmq
+        mode: "0400"
+      no_log: true

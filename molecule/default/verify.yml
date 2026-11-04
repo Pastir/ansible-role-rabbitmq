@@ -1,0 +1,95 @@
+---
+- name: Verify all nodes
+  hosts: all
+  become: true
+  tasks:
+    - name: Read versions
+      ansible.builtin.command: rabbitmqctl -q status --formatter json
+      register: __status
+      changed_when: false
+
+    - name: Read the running Erlang/OTP version
+      ansible.builtin.command: >-
+        rabbitmqctl -q eval
+        'file:read_file(filename:join([code:root_dir(), "releases", erlang:system_info(otp_release), "OTP_VERSION"])).'
+      register: __otp
+      changed_when: false
+
+    - name: RabbitMQ 3.12.14 on Erlang 26.2.5.13
+      ansible.builtin.assert:
+        that:
+          - (__status.stdout | from_json).rabbitmq_version == '3.12.14'
+          - __otp.stdout is search('<<"26\.2\.5\.13')
+        fail_msg: "{{ (__status.stdout | from_json).rabbitmq_version }} on {{ __otp.stdout }}"
+
+    - name: Packages are held
+      ansible.builtin.shell: |
+        set -o pipefail
+        dpkg --get-selections rabbitmq-server erlang-base | awk '{print $2}' | sort -u
+      args:
+        executable: /bin/bash
+      register: __held
+      changed_when: false
+      failed_when: __held.stdout != 'hold'
+
+    - name: Heartbeat applied at runtime
+      ansible.builtin.command: rabbitmqctl -q eval 'application:get_env(rabbit, heartbeat).'
+      register: __heartbeat
+      changed_when: false
+      failed_when: __heartbeat.stdout != ('{ok,30}' if inventory_hostname in groups['rabbitmq'] else '{ok,60}')
+
+    - name: Nothing pending
+      ansible.builtin.stat:
+        path: /var/lib/rabbitmq/.ansible-restart-pending
+      register: __pending
+      failed_when: __pending.stat.exists
+
+    - name: Plugins enabled
+      ansible.builtin.command: rabbitmq-plugins -q list -E -m
+      register: __plugins
+      changed_when: false
+      failed_when: __plugins.stdout_lines | sort != ['rabbitmq_management', 'rabbitmq_prometheus']
+
+    - name: App user authenticates, guest is gone
+      ansible.builtin.shell: |
+        set -o pipefail
+        rabbitmqctl -q authenticate_user app molecule-secret
+        ! rabbitmqctl -q list_users --no-table-headers | grep -qw guest
+      args:
+        executable: /bin/bash
+      changed_when: false
+
+- name: Verify the cluster
+  hosts: rabbitmq
+  become: true
+  tasks:
+    - name: Read cluster status
+      ansible.builtin.command: rabbitmqctl -q cluster_status --formatter json
+      register: __cluster
+      changed_when: false
+
+    - name: Three running members, named cluster
+      ansible.builtin.assert:
+        that:
+          - (__cluster.stdout | from_json).running_nodes | length == 3
+          - (__cluster.stdout | from_json).cluster_name == 'molecule'
+
+    - name: No node left in maintenance mode
+      ansible.builtin.command: rabbitmq-diagnostics -q check_if_node_is_quorum_critical
+      changed_when: false
+
+    - name: The message survived the rolling restart
+      ansible.builtin.command: rabbitmqctl -q -p app list_queues name type messages --no-table-headers
+      register: __queues
+      changed_when: false
+      failed_when: __queues.stdout is not search('orders\s+quorum\s+1')
+
+    - name: Feature flags enabled, policy present
+      ansible.builtin.shell: |
+        set -o pipefail
+        ! rabbitmqctl -q list_feature_flags name state stability --no-table-headers | awk '$3 == "stable" && $2 != "enabled"' | grep .
+        rabbitmqctl -q -p app list_policies --no-table-headers | grep -q '^app\s*limit'
+      args:
+        executable: /bin/bash
+      changed_when: false
+      run_once: true

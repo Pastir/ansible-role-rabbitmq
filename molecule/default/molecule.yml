@@ -1,0 +1,94 @@
+---
+# Cluster: two 24.04 nodes and one 26.04 node, all RabbitMQ 3.12.14 on Erlang 26.2.5.13
+# (on 26.04 Erlang 26 comes from the noble suite). legacy: one 24.04 node with RabbitMQ 3.12.1 and
+# Erlang 25 from the Ubuntu archive, as on the current servers, upgraded by the role.
+dependency:
+  name: galaxy
+  enabled: false
+driver:
+  name: podman
+platforms:
+  - name: rmq1-noble
+    image: docker.io/library/ubuntu:24.04
+    dockerfile: Dockerfile.j2
+    command: /lib/systemd/systemd
+    systemd: always
+    network: molecule-rabbitmq
+    hostname: rmq1-noble
+    groups: [rabbitmq]
+  - name: rmq2-noble
+    image: docker.io/library/ubuntu:24.04
+    dockerfile: Dockerfile.j2
+    command: /lib/systemd/systemd
+    systemd: always
+    network: molecule-rabbitmq
+    hostname: rmq2-noble
+    groups: [rabbitmq]
+  - name: rmq3-resolute
+    image: docker.io/library/ubuntu:26.04
+    dockerfile: Dockerfile.j2
+    command: /lib/systemd/systemd
+    systemd: always
+    network: molecule-rabbitmq
+    hostname: rmq3-resolute
+    groups: [rabbitmq]
+  - name: rmq-legacy-noble
+    image: docker.io/library/ubuntu:24.04
+    dockerfile: Dockerfile.j2
+    command: /lib/systemd/systemd
+    systemd: always
+    network: molecule-rabbitmq
+    hostname: rmq-legacy-noble
+    groups: [legacy]
+provisioner:
+  name: ansible
+  inventory:
+    group_vars:
+      all:
+        rabbitmq_conf:
+          listeners.tcp.default: 5672
+          management.tcp.port: 15672
+          management.tcp.ip: 127.0.0.1
+          heartbeat: 60
+        rabbitmq_vhosts:
+          - name: app
+        rabbitmq_users:
+          - user: app
+            password: molecule-secret
+            tags: [management]
+            permissions:
+              - vhost: app
+                configure_priv: ".*"
+                read_priv: ".*"
+                write_priv: ".*"
+          - user: guest
+            state: absent
+        rabbitmq_policies:
+          - name: limit
+            vhost: app
+            pattern: "^limited\\."
+            apply_to: queues
+            tags:
+              max-length: 1000
+      rabbitmq:
+        rabbitmq_cluster_group: rabbitmq
+        rabbitmq_cluster_name: molecule
+        rabbitmq_erlang_cookie: MOLECULECOOKIE0123456789
+        rabbitmq_enable_all_feature_flags: true
+      legacy:
+        rabbitmq_allow_upgrade: true
+        rabbitmq_env:
+          NODE_IP_ADDRESS: 127.0.0.1
+          ERL_EPMD_ADDRESS: 127.0.0.1
+scenario:
+  test_sequence:
+    - destroy
+    - create
+    - prepare
+    - converge
+    - idempotence
+    - side_effect
+    - verify
+    - destroy
+verifier:
+  name: ansible

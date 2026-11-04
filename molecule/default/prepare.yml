@@ -1,0 +1,14 @@
+---
+- name: Legacy node like the current servers (Ubuntu archive build)
+  hosts: legacy
+  become: true
+  tasks:
+    - name: Install RabbitMQ 3.12.1 and Erlang 25 from the Ubuntu archive
+      ansible.builtin.apt:
+        name: rabbitmq-server
+        update_cache: true
+
+    - name: Start it
+      ansible.builtin.systemd_service:
+        name: rabbitmq-server
+        state: started

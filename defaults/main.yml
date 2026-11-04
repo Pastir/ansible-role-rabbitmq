@@ -1,32 +1,32 @@
-__rabbitmq_daemon: rabbitmq-server
-__rabbitmq_state: restarted
-__rabbitmq_enabled: true
+---
+# RabbitMQ and Erlang from the Team RabbitMQ apt repositories
+# (https://www.rabbitmq.com/docs/install-debian#apt-quick-start).
 
-__rabbitmq_version: "3.11.9-1"
+# Exact versions, installed, pinned and held. "3.12.14" / "26.2.5.13"; full Debian versions
+# ("3.12.14-1", "1:26.2.5.13-1") are accepted too. Empty -> latest available (not recommended).
+# Compatibility matrix: https://www.rabbitmq.com/docs/which-erlang
+rabbitmq_version: "3.12.14"
+rabbitmq_erlang_version: "26.2.5.13"
+rabbitmq_hold: true
+# Allow the role to change installed RabbitMQ/Erlang versions (also replaces Ubuntu archive builds).
+# Nodes are upgraded one at a time: drain, upgrade, restart, revive, wait for the cluster.
+rabbitmq_allow_upgrade: false
 
-## Team RabbitMQ's main signing key
-__rabbitmq_team_repo_keyserver_url: "https://keys.openpgp.org/vks/v1/by-fingerprint/0A9AF2115F4687BD29803A206B73A36E6026DFCA"
-__rabbitmq_team_repo_keyserver_dst: "/usr/share/keyrings/com.rabbitmq.team.gpg"
+rabbitmq_repo_enabled: true
+# Team RabbitMQ signing key 0A9AF2115F4687BD29803A206B73A36E6026DFCA ships with the role
+# (keys.openpgp.org is not always reachable). Set a URL to download it instead.
+rabbitmq_repo_key_url: ""
+rabbitmq_repo_keyring: /etc/apt/keyrings/rabbitmq.asc
+rabbitmq_repo_mirrors:
+  - https://deb1.rabbitmq.com
+  - https://deb2.rabbitmq.com
+# Suite of the Erlang repository. Empty -> the host's release, or the nearest release that still
+# publishes the requested Erlang series (vars/main.yml; e.g. Erlang 26 on 26.04 comes from noble).
+rabbitmq_erlang_repo_suite: ""
+rabbitmq_server_repo_suite: ""
 
-## Community mirror of Cloudsmith: modern Erlang repository
-__rabbitmq_erlang_repo_keyserver_url: "https://github.com/rabbitmq/signing-keys/releases/download/3.0/cloudsmith.rabbitmq-erlang.E495BB49CC4BBE5B.key"
-__rabbitmq_erlang_repo_keyserver_dst: "/usr/share/keyrings/rabbitmq.E495BB49CC4BBE5B.gpg"
-
-## Community mirror of Cloudsmith: RabbitMQ repository
-__rabbitmq_rabbitmq_repo_keyserver_url: "https://github.com/rabbitmq/signing-keys/releases/download/3.0/cloudsmith.rabbitmq-server.9F4587F226208342.key"
-__rabbitmq_rabbitmq_repo_keyserver_dst: "/usr/share/keyrings/rabbitmq.9F4587F226208342.gpg"
-
-__rabbitmq_users: []
-
-__rabbitmq_packages:
-  - curl
-  - gnupg
-  - apt-transport-https
-
-__rabbitmq_server_packages: rabbitmq-server
-
-# Erlang packages
-__rabbitmq_erlang_packages:
+# Erlang packages (minimal set from the RabbitMQ docs).
+rabbitmq_erlang_packages:
   - erlang-base
   - erlang-asn1
   - erlang-crypto
@@ -38,11 +38,78 @@ __rabbitmq_erlang_packages:
   - erlang-parsetools
   - erlang-public-key
   - erlang-runtime-tools
+  - erlang-snmp
+  - erlang-ssl
   - erlang-syntax-tools
   - erlang-tftp
   - erlang-tools
   - erlang-xmerl
-  - erlang-snmp
-  - erlang-ssl
 
-__rabbitmq_plugins_enabled: rabbitmq_management,rabbitmq_prometheus
+rabbitmq_service_enabled: true
+
+# Node name as other nodes and the CLI see it.
+rabbitmq_nodename: "rabbit@{{ ansible_facts['hostname'] }}"
+
+# Shared Erlang cookie. Required for a cluster. Empty -> keep what the package generated.
+# A different cookie on a running node is refused (the node would leave the cluster) unless
+# the node was installed by this run or rabbitmq_erlang_cookie_force is set.
+rabbitmq_erlang_cookie: ""
+rabbitmq_erlang_cookie_force: false
+
+# /etc/rabbitmq/rabbitmq.conf as a dict: key: value (new style sysctl format).
+# null -> the file is not managed.
+rabbitmq_conf: {}
+# /etc/rabbitmq/rabbitmq-env.conf as a dict: NODE_IP_ADDRESS: 127.0.0.1. null -> not managed.
+rabbitmq_env: {}
+# Raw Erlang terms for /etc/rabbitmq/advanced.config. Empty -> file removed. null -> not managed.
+rabbitmq_advanced_config: ""
+
+# Config changes need a node restart. false -> only report which nodes need one.
+# true -> rolling restart (one node at a time, cluster health checked before and after;
+# the previous config is restored if a node does not come back).
+rabbitmq_restart_on_change: false
+# Put a node into maintenance mode (rabbitmq-upgrade drain) before stopping it.
+rabbitmq_rolling_drain: true
+# Seconds to wait for a node (and all cluster members) to be running after a restart.
+rabbitmq_health_timeout: 300
+
+# Plugins to enable. The legacy comma-separated rabbitmq_plugins_enabled string still works.
+rabbitmq_plugins: "{{ (rabbitmq_plugins_enabled | split(',') | map('trim') | list) if rabbitmq_plugins_enabled is defined
+  else ['rabbitmq_management', 'rabbitmq_prometheus'] }}"
+# Disable explicitly enabled plugins that are not listed.
+rabbitmq_plugins_exclusive: true
+
+# Cluster: inventory group whose hosts form one cluster. Empty -> standalone node.
+rabbitmq_cluster_group: ""
+# Node the others join; it also applies users, vhosts, policies.
+rabbitmq_cluster_seed: "{{ groups[rabbitmq_cluster_group][0] if rabbitmq_cluster_group else inventory_hostname }}"
+rabbitmq_cluster_name: ""
+# A node that joins is reset first. It refuses when the node still holds messages, unless forced.
+rabbitmq_cluster_join_force: false
+
+# Cluster-wide objects, applied on the seed node (community.rabbitmq modules).
+# - name: app
+#   state: present
+rabbitmq_vhosts: []
+# - user: app
+#   password: "{{ vault_rabbitmq_app_password }}"
+#   tags: [monitoring]                  # list or comma-separated string
+#   permissions:
+#     - vhost: /
+#       configure_priv: ".*"
+#       read_priv: ".*"
+#       write_priv: ".*"
+#   state: present                      # absent removes the user (e.g. guest)
+rabbitmq_users: []
+# - name: ha-all
+#   vhost: /
+#   pattern: ".*"
+#   apply_to: queues
+#   tags: {max-length: 100000}
+#   priority: 0
+#   state: present
+rabbitmq_policies: []
+
+# Enable every stable feature flag once all nodes run the same version. Irreversible
+# (a node cannot be downgraded afterwards), required before upgrading to the next minor.
+rabbitmq_enable_all_feature_flags: false

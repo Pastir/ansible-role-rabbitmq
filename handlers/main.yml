@@ -1,4 +1,0 @@
-- name: Restart rabbitmq-server
-  ansible.builtin.systemd:
-    name: "{{ rabbitmq_daemon | default(__rabbitmq_daemon) }}"
-    state: "{{ rabbitmq_state | default(__rabbitmq_state) }}"

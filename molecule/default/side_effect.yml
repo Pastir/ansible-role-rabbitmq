@@ -1,0 +1,40 @@
+---
+- name: Quorum queue with a message, then a config change with a rolling restart
+  hosts: rabbitmq
+  become: true
+  tasks:
+    - name: Declare a quorum queue
+      ansible.builtin.uri:
+        url: http://127.0.0.1:15672/api/queues/app/orders
+        method: PUT
+        user: app
+        password: molecule-secret
+        force_basic_auth: true
+        body_format: json
+        body: {durable: true, arguments: {x-queue-type: quorum}}
+        status_code: [201, 204]
+      run_once: true
+
+    - name: Publish a message
+      ansible.builtin.uri:
+        url: http://127.0.0.1:15672/api/exchanges/app/amq.default/publish
+        method: POST
+        user: app
+        password: molecule-secret
+        force_basic_auth: true
+        body_format: json
+        body: {properties: {delivery_mode: 2}, routing_key: orders, payload: hello, payload_encoding: string}
+      register: __publish
+      failed_when: not __publish.json.routed
+      run_once: true
+
+    - name: Change heartbeat with a rolling restart
+      ansible.builtin.include_role:
+        name: pastir.rabbitmq
+      vars:
+        rabbitmq_restart_on_change: true
+        rabbitmq_conf:
+          listeners.tcp.default: 5672
+          management.tcp.port: 15672
+          management.tcp.ip: 127.0.0.1
+          heartbeat: 30

@@ -1,0 +1,87 @@
+---
+# Ownership and mode belong to the package: Ubuntu's build registers a dpkg-statoverride
+# (rabbitmq:rabbitmq 2755) that dpkg re-applies on every upgrade.
+- name: Check configuration directory
+  ansible.builtin.stat:
+    path: /etc/rabbitmq
+  register: __rabbitmq_etc
+
+- name: Create configuration directory
+  ansible.builtin.file:
+    path: /etc/rabbitmq
+    state: directory
+    mode: "0755"
+  when: not __rabbitmq_etc.stat.exists
+
+- name: Write rabbitmq.conf
+  ansible.builtin.template:
+    src: rabbitmq.conf.j2
+    dest: /etc/rabbitmq/rabbitmq.conf
+    owner: root
+    group: rabbitmq
+    mode: "0640"
+    backup: true
+  register: __rabbitmq_conf_file
+  when: rabbitmq_conf is not none
+
+- name: Write rabbitmq-env.conf
+  ansible.builtin.template:
+    src: rabbitmq-env.conf.j2
+    dest: /etc/rabbitmq/rabbitmq-env.conf
+    owner: root
+    group: rabbitmq
+    mode: "0644"
+    backup: true
+  register: __rabbitmq_env_file
+  when: rabbitmq_env is not none
+
+- name: Write advanced.config
+  ansible.builtin.copy:
+    dest: /etc/rabbitmq/advanced.config
+    content: "{{ rabbitmq_advanced_config | trim ~ '\n' }}"
+    owner: root
+    group: rabbitmq
+    mode: "0640"
+    backup: true
+  register: __rabbitmq_advanced_file
+  when:
+    - rabbitmq_advanced_config is not none
+    - rabbitmq_advanced_config | length > 0
+
+- name: Remove advanced.config
+  ansible.builtin.file:
+    path: /etc/rabbitmq/advanced.config
+    state: absent
+  register: __rabbitmq_advanced_removed
+  when:
+    - rabbitmq_advanced_config is not none
+    - rabbitmq_advanced_config | length == 0
+
+- name: Collect configuration changes
+  ansible.builtin.set_fact:
+    __rabbitmq_config_changes: >-
+      {{ [__rabbitmq_conf_file, __rabbitmq_env_file, __rabbitmq_advanced_file, __rabbitmq_advanced_removed]
+         | selectattr('changed', 'defined') | selectattr('changed') | list }}
+
+# Survives the run, so a later run still reports (or performs) the restart.
+- name: Mark a pending restart
+  ansible.builtin.copy:
+    dest: "{{ __rabbitmq_pending_marker }}"
+    content: "Configuration changed by Ansible; restart rabbitmq-server to apply it.\n"
+    owner: root
+    group: root
+    mode: "0644"
+  when: __rabbitmq_config_changes | length > 0
+
+- name: Check for a pending restart
+  ansible.builtin.stat:
+    path: "{{ __rabbitmq_pending_marker }}"
+  register: __rabbitmq_pending
+
+- name: Decide on restart and upgrade
+  ansible.builtin.set_fact:
+    # A fresh node has nothing to protect, so it restarts right away.
+    __rabbitmq_restart_now: >-
+      {{ __rabbitmq_cookie_differs
+         or (__rabbitmq_pending.stat.exists and (rabbitmq_restart_on_change or not __rabbitmq_installed)) }}
+    __rabbitmq_upgrade_now: "{{ __rabbitmq_installed and __rabbitmq_outdated | length > 0 }}"

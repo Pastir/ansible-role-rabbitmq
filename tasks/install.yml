@@ -1,0 +1,133 @@
+---
+- name: Add Team RabbitMQ repositories
+  when: rabbitmq_repo_enabled
+  block:
+    - name: Create keyrings directory
+      ansible.builtin.file:
+        path: "{{ rabbitmq_repo_keyring | dirname }}"
+        state: directory
+        mode: "0755"
+
+    - name: Install Team RabbitMQ signing key
+      ansible.builtin.copy:
+        src: rabbitmq-release-signing-key.asc
+        dest: "{{ rabbitmq_repo_keyring }}"
+        owner: root
+        group: root
+        mode: "0644"
+      when: rabbitmq_repo_key_url | length == 0
+
+    - name: Download Team RabbitMQ signing key
+      ansible.builtin.get_url:
+        url: "{{ rabbitmq_repo_key_url }}"
+        dest: "{{ rabbitmq_repo_keyring }}"
+        owner: root
+        group: root
+        mode: "0644"
+      when: rabbitmq_repo_key_url | length > 0
+
+    # Earlier versions of this role and the RabbitMQ docs use a list file.
+    - name: Remove legacy list-style sources
+      ansible.builtin.file:
+        path: "/etc/apt/sources.list.d/{{ item }}"
+        state: absent
+      loop:
+        - rabbitmq.list
+        - rabbitmq_rabbitmq-server.list
+        - rabbitmq_rabbitmq-erlang.list
+
+    - name: Add RabbitMQ apt sources
+      ansible.builtin.deb822_repository:
+        name: "{{ item.name }}"
+        types: [deb]
+        uris: "{{ rabbitmq_repo_mirrors | map('regex_replace', '/*$', '/' ~ item.name ~ '/ubuntu/' ~ item.suite) | list }}"
+        suites: ["{{ item.suite }}"]
+        components: [main]
+        architectures: [amd64]
+        signed_by: "{{ rabbitmq_repo_keyring }}"
+        install_python_debian: true
+      loop:
+        - {name: rabbitmq-erlang, suite: "{{ __rabbitmq_erlang_suite }}"}
+        - {name: rabbitmq-server, suite: "{{ __rabbitmq_server_suite }}"}
+      loop_control:
+        label: "{{ item.name }} {{ item.suite }}"
+      register: __rabbitmq_repo
+
+# Candidate = the pinned version even when the Ubuntu archive or the repo have newer builds.
+# Priority stays below 1000, so apt never downgrades on its own.
+- name: Pin RabbitMQ and Erlang versions
+  ansible.builtin.copy:
+    dest: /etc/apt/preferences.d/rabbitmq
+    content: |
+      # Managed by Ansible (pastir.rabbitmq), do not edit.
+      {% if rabbitmq_erlang_version %}
+      Package: erlang*
+      Pin: version {{ __rabbitmq_erlang_pkg_version }}
+      Pin-Priority: 990
+
+      {% endif %}
+      {% if rabbitmq_version %}
+      Package: rabbitmq-server
+      Pin: version {{ __rabbitmq_server_pkg_version }}
+      Pin-Priority: 990
+      {% endif %}
+    owner: root
+    group: root
+    mode: "0644"
+  register: __rabbitmq_pin
+
+- name: Gather installed packages
+  ansible.builtin.package_facts:
+    manager: apt
+
+- name: Compare installed versions
+  ansible.builtin.set_fact:
+    __rabbitmq_installed: "{{ 'rabbitmq-server' in ansible_facts.packages }}"
+    __rabbitmq_outdated: >-
+      {{ (['rabbitmq-server'] if rabbitmq_version and 'rabbitmq-server' in ansible_facts.packages
+            and ansible_facts.packages['rabbitmq-server'][0].version is not match(__server_re) else [])
+         + (rabbitmq_erlang_packages | select('in', ansible_facts.packages)
+            | map('extract', ansible_facts.packages) | map('first')
+            | rejectattr('version', 'match', __erlang_re) | map(attribute='name') | list
+            if rabbitmq_erlang_version else []) }}
+  vars:
+    __server_re: "^{{ __rabbitmq_server_pkg_version | regex_escape | replace('\\*', '.*') }}$"
+    __erlang_re: "^{{ __rabbitmq_erlang_pkg_version | regex_escape | replace('\\*', '.*') }}$"
+
+- name: Refuse implicit RabbitMQ / Erlang version change
+  ansible.builtin.assert:
+    that: rabbitmq_allow_upgrade or not __rabbitmq_upgrade_needed
+    fail_msg: >-
+      Installed: rabbitmq-server {{ (ansible_facts.packages['rabbitmq-server'] | default([{}]))[0].version | default('-') }},
+      erlang-base {{ (ansible_facts.packages['erlang-base'] | default([{}]))[0].version | default('-') }}.
+      Required: {{ __rabbitmq_server_pkg_version }} / {{ __rabbitmq_erlang_pkg_version }}
+      (outdated: {{ __rabbitmq_outdated | join(', ') }}). Re-run with -e rabbitmq_allow_upgrade=true
+      to upgrade node by node (each node is drained and restarted).
+    quiet: true
+  vars:
+    __rabbitmq_upgrade_needed: "{{ __rabbitmq_installed and __rabbitmq_outdated | length > 0 }}"
+
+- name: Install RabbitMQ and Erlang
+  ansible.builtin.apt:
+    name: "{{ __rabbitmq_install_list }}"
+    state: present
+    update_cache: true
+    cache_valid_time: "{{ 0 if (__rabbitmq_repo is changed or __rabbitmq_pin is changed) else 3600 }}"
+    allow_change_held_packages: true
+  # An installed node is upgraded later, in its rolling turn.
+  when: not __rabbitmq_installed or __rabbitmq_outdated | length == 0
+
+- name: Install health check helper
+  ansible.builtin.copy:
+    src: rabbitmq-wait-healthy
+    dest: "{{ __rabbitmq_health_script }}"
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Enable and start RabbitMQ
+  ansible.builtin.systemd_service:
+    name: rabbitmq-server
+    enabled: "{{ rabbitmq_service_enabled }}"
+    state: started
+  when: not ansible_check_mode or __rabbitmq_installed

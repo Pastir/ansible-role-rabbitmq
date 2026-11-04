@@ -1,0 +1,109 @@
+---
+# Included once per cluster host (loop var __rabbitmq_turn); only that host acts.
+- name: "Rolling step on {{ __rabbitmq_turn }}"
+  when:
+    - inventory_hostname == __rabbitmq_turn
+    - __rabbitmq_upgrade_now or __rabbitmq_restart_now
+  block:
+    - name: Refuse to continue after another node failed
+      ansible.builtin.assert:
+        that: __rabbitmq_cluster_hosts_all | difference(ansible_play_hosts) | length == 0
+        fail_msg: "Nodes failed earlier in this run: {{ __rabbitmq_cluster_hosts_all | difference(ansible_play_hosts) | join(', ') }}"
+        quiet: true
+
+    - name: Check whether RabbitMQ is running
+      ansible.builtin.systemd_service:
+        name: rabbitmq-server
+      register: __rabbitmq_unit
+
+    # Never take a node down while another member is down or alarms are raised.
+    - name: Check node and cluster health before stopping the node
+      ansible.builtin.command: "{{ __rabbitmq_health_script }} 0"
+      changed_when: false
+      when: __rabbitmq_unit.status.ActiveState == 'active'
+
+    - name: Put the node into maintenance mode
+      ansible.builtin.shell:
+        cmd: |
+          set -eo pipefail
+          rabbitmq-upgrade --timeout 300 await_online_quorum_plus_one
+          # Classic mirrored queues are gone in 4.x, and so is this command.
+          if rabbitmq-upgrade help 2>/dev/null | grep -qw await_online_synchronized_mirror; then
+            rabbitmq-upgrade --timeout 300 await_online_synchronized_mirror
+          fi
+          rabbitmq-upgrade drain
+        executable: /bin/bash
+      changed_when: true
+      when:
+        - rabbitmq_rolling_drain
+        - __rabbitmq_is_cluster
+        - __rabbitmq_unit.status.ActiveState == 'active'
+
+    - name: Upgrade RabbitMQ and Erlang
+      ansible.builtin.apt:
+        name: "{{ __rabbitmq_install_list }}"
+        state: present
+        update_cache: true
+        allow_change_held_packages: true
+        allow_downgrade: true
+      when: __rabbitmq_upgrade_now
+
+    - name: Restart RabbitMQ
+      ansible.builtin.systemd_service:
+        name: rabbitmq-server
+        state: restarted
+
+    - name: Wait for the node and the cluster
+      ansible.builtin.command: "{{ __rabbitmq_health_script }} {{ rabbitmq_health_timeout | int }}"
+      changed_when: false
+
+    # A drained node stays in maintenance mode after a restart.
+    - name: Take the node out of maintenance mode
+      ansible.builtin.command: rabbitmq-upgrade revive
+      changed_when: true
+      when:
+        - rabbitmq_rolling_drain
+        - __rabbitmq_is_cluster
+
+    - name: Clear the pending restart mark
+      ansible.builtin.file:
+        path: "{{ __rabbitmq_pending_marker }}"
+        state: absent
+
+  rescue:
+    - name: Restore the previous configuration
+      ansible.builtin.copy:
+        src: "{{ item.backup_file }}"
+        dest: "{{ item.dest }}"
+        remote_src: true
+        owner: root
+        group: rabbitmq
+        mode: preserve
+      loop: "{{ __rabbitmq_config_changes | selectattr('backup_file', 'defined') | list }}"
+      loop_control:
+        label: "{{ item.dest }}"
+      register: __rabbitmq_restored
+
+    - name: Start RabbitMQ with the previous configuration
+      when: __rabbitmq_restored.results | default([]) | length > 0
+      block:
+        - name: Restart RabbitMQ with the previous configuration
+          ansible.builtin.systemd_service:
+            name: rabbitmq-server
+            state: restarted
+          failed_when: false
+
+        - name: Wait for the node and take it out of maintenance mode
+          ansible.builtin.shell:
+            cmd: "{{ __rabbitmq_health_script }} {{ rabbitmq_health_timeout | int }} && rabbitmq-upgrade revive"
+            executable: /bin/bash
+          changed_when: true
+          failed_when: false
+
+    - name: Stop the rolling step
+      ansible.builtin.fail:
+        msg: >-
+          {{ inventory_hostname }}: {{ ansible_failed_task.name }} failed
+          ({{ ansible_failed_result.msg | default(ansible_failed_result.stderr | default('')) }}).
+          {{ 'Previous configuration restored. ' if __rabbitmq_restored.results | default([]) | length > 0 else '' }}
+          Remaining nodes were not touched.

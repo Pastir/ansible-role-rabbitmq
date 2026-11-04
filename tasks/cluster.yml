@@ -1,0 +1,45 @@
+---
+# Included once per cluster host (loop var __rabbitmq_turn); only that host acts.
+- name: "Join the cluster on {{ __rabbitmq_turn }}"
+  when:
+    - inventory_hostname == __rabbitmq_turn
+    - not __rabbitmq_is_seed
+  block:
+    - name: Read cluster membership
+      ansible.builtin.command: rabbitmqctl -q cluster_status --formatter json
+      register: __rabbitmq_cluster_status
+      changed_when: false
+
+    - name: Check queued messages of the joining node
+      ansible.builtin.command: rabbitmqctl -q list_queues --local --no-table-headers messages
+      register: __rabbitmq_local_messages
+      changed_when: false
+      when: __rabbitmq_seed_nodename not in (__rabbitmq_cluster_status.stdout | from_json).disk_nodes
+
+    # Joining resets the node: its own vhosts, users and messages are dropped.
+    - name: Join the seed node
+      when: __rabbitmq_seed_nodename not in (__rabbitmq_cluster_status.stdout | from_json).disk_nodes
+      block:
+        - name: Refuse to reset a node that holds messages
+          ansible.builtin.assert:
+            that: rabbitmq_cluster_join_force or __rabbitmq_local_messages.stdout_lines | map('int') | sum == 0
+            fail_msg: >-
+              {{ rabbitmq_nodename }} is not a member of {{ __rabbitmq_seed_nodename }}'s cluster and holds
+              {{ __rabbitmq_local_messages.stdout_lines | map('int') | sum }} messages. Joining resets the node.
+              Drain it, or set rabbitmq_cluster_join_force: true.
+            quiet: true
+
+        - name: Reset the node and join the cluster
+          ansible.builtin.shell:
+            cmd: |
+              set -e
+              rabbitmqctl stop_app
+              rabbitmqctl reset
+              rabbitmqctl join_cluster {{ __rabbitmq_seed_nodename | quote }}
+              rabbitmqctl start_app
+            executable: /bin/bash
+          changed_when: true
+
+        - name: Wait for the node and the cluster
+          ansible.builtin.command: "{{ __rabbitmq_health_script }} {{ rabbitmq_health_timeout | int }}"
+          changed_when: false

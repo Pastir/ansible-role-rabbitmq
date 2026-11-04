@@ -1,0 +1,69 @@
+---
+# Users, vhosts, policies and feature flags are cluster-wide: applied once, on the seed node.
+- name: Cluster-wide objects
+  when: __rabbitmq_is_seed
+  block:
+    - name: Set cluster name
+      ansible.builtin.command: rabbitmqctl -q cluster_status --formatter json
+      register: __rabbitmq_name_status
+      changed_when: false
+      check_mode: false
+      when: rabbitmq_cluster_name | length > 0
+
+    - name: Rename the cluster
+      ansible.builtin.command: rabbitmqctl set_cluster_name {{ rabbitmq_cluster_name | quote }}
+      changed_when: true
+      when:
+        - rabbitmq_cluster_name | length > 0
+        - (__rabbitmq_name_status.stdout | from_json).cluster_name != rabbitmq_cluster_name
+
+    - name: Vhosts
+      community.rabbitmq.rabbitmq_vhost:
+        name: "{{ item.name }}"
+        tracing: "{{ item.tracing | default(omit) }}"
+        state: "{{ item.state | default('present') }}"
+      loop: "{{ rabbitmq_vhosts }}"
+      loop_control:
+        label: "{{ item.name }}"
+
+    - name: Users
+      community.rabbitmq.rabbitmq_user:
+        user: "{{ item.user }}"
+        password: "{{ item.password | default(omit) }}"
+        update_password: always
+        tags: "{{ (item.tags | join(',')) if item.tags is defined and item.tags is not string else (item.tags | default(omit)) }}"
+        permissions: "{{ item.permissions | default(omit) }}"
+        topic_permissions: "{{ item.topic_permissions | default(omit) }}"
+        state: "{{ item.state | default('present') }}"
+      loop: "{{ rabbitmq_users }}"
+      loop_control:
+        label: "{{ item.user }} ({{ item.state | default('present') }})"
+      no_log: true
+
+    - name: Policies
+      community.rabbitmq.rabbitmq_policy:
+        name: "{{ item.name }}"
+        vhost: "{{ item.vhost | default('/') }}"
+        pattern: "{{ item.pattern }}"
+        apply_to: "{{ item.apply_to | default('all') }}"
+        tags: "{{ item.tags | default({}) }}"
+        priority: "{{ item.priority | default(0) }}"
+        state: "{{ item.state | default('present') }}"
+      loop: "{{ rabbitmq_policies }}"
+      loop_control:
+        label: "{{ item.vhost | default('/') }} {{ item.name }}"
+
+    - name: Read feature flags
+      ansible.builtin.command: rabbitmqctl -q list_feature_flags name state stability --formatter json
+      register: __rabbitmq_feature_flags
+      changed_when: false
+      check_mode: false
+      when: rabbitmq_enable_all_feature_flags
+
+    - name: Enable all stable feature flags
+      ansible.builtin.command: rabbitmqctl enable_feature_flag all
+      changed_when: true
+      when:
+        - rabbitmq_enable_all_feature_flags
+        - __rabbitmq_feature_flags.stdout | from_json | selectattr('stability', 'equalto', 'stable')
+          | rejectattr('state', 'equalto', 'enabled') | list | length > 0

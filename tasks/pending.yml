@@ -1,0 +1,12 @@
+---
+- name: Check for a pending restart after the rolling step
+  ansible.builtin.stat:
+    path: "{{ __rabbitmq_pending_marker }}"
+  register: __rabbitmq_pending_after
+
+- name: Report a pending restart
+  ansible.builtin.debug:
+    msg: >-
+      RabbitMQ configuration changed but the node was not restarted. Restart it in a maintenance window
+      (node by node) or re-run with -e rabbitmq_restart_on_change=true for a rolling restart.
+  when: __rabbitmq_pending_after.stat.exists
