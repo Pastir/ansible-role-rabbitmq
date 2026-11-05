@@ -12,3 +12,11 @@
       ansible.builtin.systemd_service:
         name: rabbitmq-server
         state: started
+
+    # Left by an older setup; must survive a refused run and be removed by the upgrade.
+    - name: Legacy list-style source
+      ansible.builtin.copy:
+        dest: /etc/apt/sources.list.d/rabbitmq.list
+        content: |
+          # deb [signed-by=/usr/share/keyrings/rabbitmq.gpg] https://deb1.rabbitmq.com/rabbitmq-server/ubuntu/noble noble main
+        mode: "0644"

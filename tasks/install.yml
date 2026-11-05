@@ -76,37 +76,6 @@
     mode: "0644"
   register: __rabbitmq_pin
 
-- name: Gather installed packages
-  ansible.builtin.package_facts:
-    manager: apt
-
-- name: Compare installed versions
-  ansible.builtin.set_fact:
-    __rabbitmq_installed: "{{ 'rabbitmq-server' in ansible_facts.packages }}"
-    __rabbitmq_outdated: >-
-      {{ (['rabbitmq-server'] if rabbitmq_version and 'rabbitmq-server' in ansible_facts.packages
-            and ansible_facts.packages['rabbitmq-server'][0].version is not match(__server_re) else [])
-         + (rabbitmq_erlang_packages | select('in', ansible_facts.packages)
-            | map('extract', ansible_facts.packages) | map('first')
-            | rejectattr('version', 'match', __erlang_re) | map(attribute='name') | list
-            if rabbitmq_erlang_version else []) }}
-  vars:
-    __server_re: "^{{ __rabbitmq_server_pkg_version | regex_escape | replace('\\*', '.*') }}$"
-    __erlang_re: "^{{ __rabbitmq_erlang_pkg_version | regex_escape | replace('\\*', '.*') }}$"
-
-- name: Refuse implicit RabbitMQ / Erlang version change
-  ansible.builtin.assert:
-    that: rabbitmq_allow_upgrade or not __rabbitmq_upgrade_needed
-    fail_msg: >-
-      Installed: rabbitmq-server {{ (ansible_facts.packages['rabbitmq-server'] | default([{}]))[0].version | default('-') }},
-      erlang-base {{ (ansible_facts.packages['erlang-base'] | default([{}]))[0].version | default('-') }}.
-      Required: {{ __rabbitmq_server_pkg_version }} / {{ __rabbitmq_erlang_pkg_version }}
-      (outdated: {{ __rabbitmq_outdated | join(', ') }}). Re-run with -e rabbitmq_allow_upgrade=true
-      to upgrade node by node (each node is drained and restarted).
-    quiet: true
-  vars:
-    __rabbitmq_upgrade_needed: "{{ __rabbitmq_installed and __rabbitmq_outdated | length > 0 }}"
-
 - name: Install RabbitMQ and Erlang
   ansible.builtin.apt:
     name: "{{ __rabbitmq_install_list }}"
@@ -114,6 +83,8 @@
     update_cache: true
     cache_valid_time: "{{ 0 if (__rabbitmq_repo is changed or __rabbitmq_pin is changed) else 3600 }}"
     allow_change_held_packages: true
+    # Only reachable with a different Erlang already installed when rabbitmq_allow_upgrade is set.
+    allow_downgrade: "{{ rabbitmq_allow_upgrade | bool }}"
   # An installed node is upgraded later, in its rolling turn.
   when: not __rabbitmq_installed or __rabbitmq_outdated | length == 0
 

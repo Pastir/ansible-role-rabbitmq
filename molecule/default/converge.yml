@@ -1,4 +1,69 @@
 ---
+# Without rabbitmq_allow_upgrade the legacy node (Ubuntu archive build) must be refused before
+# anything is changed. Skipped once the node is upgraded (idempotence run).
+- name: Refused version change leaves the host untouched
+  hosts: legacy
+  become: true
+  tasks:
+    - name: Read installed packages
+      ansible.builtin.package_facts:
+        manager: apt
+
+    - name: Run the role without rabbitmq_allow_upgrade
+      when: ansible_facts.packages['rabbitmq-server'][0].version is search('ubuntu')
+      block:
+        - name: Snapshot apt sources and preferences
+          ansible.builtin.find:
+            paths: [/etc/apt/sources.list.d, /etc/apt/preferences.d, /etc/apt/keyrings]
+            get_checksum: true
+          register: __before
+
+        - name: Apply the role
+          ansible.builtin.include_role:
+            name: pastir.rabbitmq
+          vars:
+            rabbitmq_allow_upgrade: false
+
+        - name: The role should have failed
+          ansible.builtin.fail:
+            msg: The role did not refuse the version change
+          register: __not_refused
+
+      rescue:
+        - name: Refused by the version guard, with current and required versions
+          ansible.builtin.assert:
+            that:
+              - __not_refused is not defined
+              - ansible_failed_task.name is search('Refuse implicit RabbitMQ')
+              - ansible_failed_result.msg is search('rabbitmq-server:\s+installed 3\.12\.1-')
+              - ansible_failed_result.msg is search('required 3\.12\.14-\*')
+              - ansible_failed_result.msg is search('Erlang \(erlang-base\):\s+installed 1:25\.3\.2\.8\+dfsg-')
+              - ansible_failed_result.msg is search('rabbitmq_allow_upgrade=true')
+
+        - name: Snapshot apt sources and preferences again
+          ansible.builtin.find:
+            paths: [/etc/apt/sources.list.d, /etc/apt/preferences.d, /etc/apt/keyrings]
+            get_checksum: true
+          register: __after
+
+        - name: Nothing changed (no pin, no new sources or key, legacy source kept)
+          ansible.builtin.assert:
+            that:
+              - (__after.files | map(attribute='path') | sort) == (__before.files | map(attribute='path') | sort)
+              - (__after.files | map(attribute='checksum') | sort) == (__before.files | map(attribute='checksum') | sort)
+              - __after.files | selectattr('path', 'eq', '/etc/apt/preferences.d/rabbitmq') | length == 0
+              - __after.files | selectattr('path', 'search', 'rabbitmq-(server|erlang)\.sources$') | length == 0
+              - __after.files | selectattr('path', 'eq', '/etc/apt/sources.list.d/rabbitmq.list') | length == 1
+            fail_msg: "{{ __before.files | map(attribute='path') | list }} -> {{ __after.files | map(attribute='path') | list }}"
+
+        - name: Read packages after the refused run
+          ansible.builtin.package_facts:
+            manager: apt
+
+        - name: Versions unchanged
+          ansible.builtin.assert:
+            that: ansible_facts.packages['rabbitmq-server'][0].version is search('ubuntu')
+
 - name: Converge
   hosts: all
   become: true

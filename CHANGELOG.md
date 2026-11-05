@@ -1,5 +1,18 @@
 # Changelog
 
+## 2.1.0 — 2026-11
+
+### Changed
+- The version guard (`rabbitmq_allow_upgrade`) runs before any change on the host: a refused run no longer
+  installs the key, replaces `rabbitmq.list` with deb822 sources or writes `/etc/apt/preferences.d/rabbitmq`
+  (whose `erlang*` pin would let a later manual `apt upgrade` change Erlang under the running broker).
+- The guard also covers Erlang packages installed without `rabbitmq-server`.
+- The failure message lists installed and required `rabbitmq-server` / Erlang versions and how to proceed.
+
+### Fixed
+- `rabbitmq_version` / `rabbitmq_erlang_version` accept Ubuntu build strings such as `3.12.1-1ubuntu1.7`
+  and `1:25.3.2.8+dfsg-1ubuntu4.8` (to keep an installed build pinned).
+
 ## 2.0.0 — 2026-11
 
 ### BREAKING

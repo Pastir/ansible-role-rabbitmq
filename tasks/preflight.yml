@@ -1,0 +1,39 @@
+---
+# Runs before anything is changed (keys, sources, pins, packages): a refused version change
+# must leave the host exactly as it was.
+- name: Gather installed packages
+  ansible.builtin.package_facts:
+    manager: apt
+
+# Installed version strings are taken as they are (Ubuntu builds like "1:25.3.2.8+dfsg-1ubuntu4.8"
+# included); only the required version is turned into a pattern ("3.12.14-*" -> ^3\.12\.14-.*$).
+- name: Compare installed versions
+  ansible.builtin.set_fact:
+    __rabbitmq_installed: "{{ 'rabbitmq-server' in ansible_facts.packages }}"
+    __rabbitmq_installed_server: "{{ (ansible_facts.packages['rabbitmq-server'] | default([{}]))[0].version | default('') }}"
+    __rabbitmq_installed_erlang: "{{ (ansible_facts.packages['erlang-base'] | default([{}]))[0].version | default('') }}"
+    __rabbitmq_outdated: >-
+      {{ (['rabbitmq-server'] if rabbitmq_version and 'rabbitmq-server' in ansible_facts.packages
+            and ansible_facts.packages['rabbitmq-server'][0].version is not match(__server_re) else [])
+         + (rabbitmq_erlang_packages | select('in', ansible_facts.packages)
+            | map('extract', ansible_facts.packages) | map('first')
+            | rejectattr('version', 'match', __erlang_re) | map(attribute='name') | list
+            if rabbitmq_erlang_version else []) }}
+  vars:
+    __server_re: "^{{ __rabbitmq_server_pkg_version | regex_escape | replace('\\*', '.*') }}$"
+    __erlang_re: "^{{ __rabbitmq_erlang_pkg_version | regex_escape | replace('\\*', '.*') }}$"
+
+- name: Refuse implicit RabbitMQ / Erlang version change
+  ansible.builtin.assert:
+    that: rabbitmq_allow_upgrade or __rabbitmq_outdated | length == 0
+    fail_msg: >-
+      {{ inventory_hostname }}: installed versions differ from the required ones, nothing was changed.
+      rabbitmq-server: installed {{ __rabbitmq_installed_server or '-' }},
+      required {{ __rabbitmq_server_pkg_version if rabbitmq_version else 'any' }}.
+      Erlang (erlang-base): installed {{ __rabbitmq_installed_erlang or '-' }},
+      required {{ __rabbitmq_erlang_pkg_version if rabbitmq_erlang_version else 'any' }}.
+      Packages to change: {{ __rabbitmq_outdated | join(', ') }}.
+      To upgrade, re-run on the whole cluster group with -e rabbitmq_allow_upgrade=true:
+      nodes are upgraded one at a time (health check, drain, upgrade, restart, revive).
+      To keep the installed build instead, set rabbitmq_version / rabbitmq_erlang_version to it.
+    quiet: true

@@ -2,8 +2,9 @@
 - name: Validate input
   ansible.builtin.assert:
     that:
-      - rabbitmq_version is match('^(\d+\.\d+\.\d+(-\S+)?)?$')
-      - rabbitmq_erlang_version is match('^((\d+:)?\d+(\.\d+)*(-\S+)?)?$')
+      # Debian versions, Ubuntu builds included: "3.12.1-1ubuntu1.7", "1:25.3.2.8+dfsg-1ubuntu4.8".
+      - rabbitmq_version is match('^(\d+\.\d+\.\d+[0-9A-Za-z.+~]*(-[0-9A-Za-z.+~]+)?)?$')
+      - rabbitmq_erlang_version is match('^((\d+:)?\d+(\.\d+)*[0-9A-Za-z.+~]*(-[0-9A-Za-z.+~]+)?)?$')
       - rabbitmq_plugins is not string
       - not __rabbitmq_is_cluster or rabbitmq_cluster_group in groups
       - not __rabbitmq_is_cluster or inventory_hostname in groups[rabbitmq_cluster_group]
@@ -15,6 +16,11 @@
       rabbitmq_cluster_group/rabbitmq_cluster_seed, and rabbitmq_erlang_cookie (letters and digits,
       at least 20 characters, required for a cluster).
     quiet: true
+  tags: [rabbitmq, rabbitmq_install, rabbitmq_config]
+
+# Before any change on the host.
+- name: Check installed versions
+  ansible.builtin.import_tasks: preflight.yml
   tags: [rabbitmq, rabbitmq_install, rabbitmq_config]
 
 - name: Install RabbitMQ and Erlang

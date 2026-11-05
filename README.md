@@ -23,10 +23,10 @@ If a node does not come back, its previous config is restored and the remaining 
 
 | Variable | Default | |
 |---|---|---|
-| `rabbitmq_version` | `3.12.14` | `"3.12.14"` or full `"3.12.14-1"`. Empty = latest |
-| `rabbitmq_erlang_version` | `26.2.5.13` | `"26.2.5.13"` or full `"1:26.2.5.13-1"`. [Compatibility](https://www.rabbitmq.com/docs/which-erlang) |
+| `rabbitmq_version` | `3.12.14` | `"3.12.14"` or full `"3.12.14-1"` (Ubuntu builds too: `"3.12.1-1ubuntu1.7"`). Empty = latest |
+| `rabbitmq_erlang_version` | `26.2.5.13` | `"26.2.5.13"` or full `"1:26.2.5.13-1"` (`"1:25.3.2.8+dfsg-1ubuntu4.8"`). [Compatibility](https://www.rabbitmq.com/docs/which-erlang) |
 | `rabbitmq_hold` | `true` | `dpkg --set-selections hold` |
-| `rabbitmq_allow_upgrade` | `false` | Without it the role fails if installed versions differ (this includes replacing Ubuntu archive builds) |
+| `rabbitmq_allow_upgrade` | `false` | Without it the role fails if installed versions differ (this includes replacing Ubuntu archive builds). The check runs before any change: a refused host keeps its sources, pins and packages |
 | `rabbitmq_erlang_repo_suite` | `""` | Empty = host release. If the Erlang series is no longer built for that release, the nearest one is used (`vars/main.yml`) |
 
 The Team RabbitMQ repository has only Erlang 27 for 26.04. Erlang 26 is therefore taken from the noble suite,
@@ -110,7 +110,8 @@ all members.
 
 `molecule test` covers:
 - a cluster of 24.04 + 24.04 + 26.04 nodes;
-- an extra 24.04 node with RabbitMQ 3.12.1 and Erlang 25 from the Ubuntu archive, upgraded by the role;
+- an extra 24.04 node with RabbitMQ 3.12.1 and Erlang 25 from the Ubuntu archive: refused without
+  `rabbitmq_allow_upgrade` (apt sources, key and pins stay untouched), then upgraded by the role;
 - a quorum queue message that survives a rolling restart after a config change;
 - users, policies, feature flags, holds.
 
