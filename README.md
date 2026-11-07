@@ -16,7 +16,7 @@ If a node does not come back, its previous config is restored and the remaining 
 ## Requirements
 
 - Ubuntu 24.04 (noble) or 26.04 (resolute), amd64
-- ansible-core >= 2.16, collection `community.rabbitmq` (`meta/requirements.yml`)
+- ansible-core >= 2.16, collection `community.rabbitmq` (`requirements.yml` in the role root)
 - Cluster nodes resolve each other's short hostnames (`rabbit@<hostname>`)
 
 ## Versions
@@ -123,10 +123,13 @@ roles:
   - name: pastir.rabbitmq
     src: git+git@github.com:Pastir/ansible-role-rabbitmq.git
     version: main  # or a tag
+# A role cannot install collections by itself: the project lists them (see requirements.yml in the role root).
+collections:
+  - name: community.rabbitmq
 ```
 
 ```bash
-ansible-galaxy install -r requirements.yml
+ansible-galaxy install -r requirements.yml   # roles and collections
 ```
 
 ## License
