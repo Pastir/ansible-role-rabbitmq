@@ -50,7 +50,8 @@ rabbitmq_service_enabled: true
 # Node name as other nodes and the CLI see it.
 rabbitmq_nodename: "rabbit@{{ ansible_facts['hostname'] }}"
 
-# Shared Erlang cookie. Required for a cluster. Empty -> keep what the package generated.
+# Shared Erlang cookie. Required for a cluster: printable ASCII without spaces (base64 is fine), >= 20 chars.
+# Empty -> keep what the package generated.
 # A different cookie on a running node is refused (the node would leave the cluster) unless
 # the node was installed by this run or rabbitmq_erlang_cookie_force is set.
 rabbitmq_erlang_cookie: ""

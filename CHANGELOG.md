@@ -1,5 +1,12 @@
 # Changelog
 
+## 2.1.2 — 2026-11
+
+### Fixed
+- `rabbitmq_erlang_cookie` may contain any printable ASCII except whitespace. Cookies generated as base64
+  (`+`, `/`, `=`) were refused by the input check, so an existing cluster with such a cookie could not be taken
+  over. The molecule cluster now runs with a base64-style cookie.
+
 ## 2.1.1 — 2026-11
 
 ### Fixed

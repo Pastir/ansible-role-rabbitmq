@@ -56,7 +56,7 @@ A fresh node (installed by this run) is restarted right away.
 |---|---|---|
 | `rabbitmq_cluster_group` | `""` | Inventory group of one cluster. Empty = standalone |
 | `rabbitmq_cluster_seed` | first host of the group | The others join it. Cluster-wide objects are applied there |
-| `rabbitmq_erlang_cookie` | `""` | Required for a cluster (letters/digits, ≥ 20). Keep it in a vault |
+| `rabbitmq_erlang_cookie` | `""` | Required for a cluster (printable ASCII without spaces, e.g. base64; ≥ 20). Keep it in a vault |
 | `rabbitmq_erlang_cookie_force` | `false` | Allow replacing the cookie of an installed node |
 | `rabbitmq_cluster_name` | `""` | `set_cluster_name` |
 | `rabbitmq_cluster_join_force` | `false` | A joining node is reset first. The role refuses this while the node holds messages |

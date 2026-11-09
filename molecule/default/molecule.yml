@@ -73,7 +73,7 @@ provisioner:
       rabbitmq:
         rabbitmq_cluster_group: rabbitmq
         rabbitmq_cluster_name: molecule
-        rabbitmq_erlang_cookie: MOLECULECOOKIE0123456789
+        rabbitmq_erlang_cookie: MOLECULE+COOKIE/0123456789=
         rabbitmq_enable_all_feature_flags: true
       legacy:
         rabbitmq_allow_upgrade: true

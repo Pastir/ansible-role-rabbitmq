@@ -10,11 +10,12 @@
       - not __rabbitmq_is_cluster or inventory_hostname in groups[rabbitmq_cluster_group]
       - not __rabbitmq_is_cluster or rabbitmq_cluster_seed in groups[rabbitmq_cluster_group]
       - not __rabbitmq_is_cluster or rabbitmq_erlang_cookie | length >= 20
-      - rabbitmq_erlang_cookie is match('^[A-Za-z0-9]*$')
+      # Printable ASCII without whitespace: base64 cookies (+ /) are common; the file is read as is.
+      - rabbitmq_erlang_cookie is match('^[!-~]*\Z')
     fail_msg: >-
       Check rabbitmq_version ("3.12.14"), rabbitmq_erlang_version ("26.2.5.13"), rabbitmq_plugins (list),
-      rabbitmq_cluster_group/rabbitmq_cluster_seed, and rabbitmq_erlang_cookie (letters and digits,
-      at least 20 characters, required for a cluster).
+      rabbitmq_cluster_group/rabbitmq_cluster_seed, and rabbitmq_erlang_cookie (printable ASCII
+      without spaces, at least 20 characters, required for a cluster).
     quiet: true
   tags: [rabbitmq, rabbitmq_install, rabbitmq_config]
 
