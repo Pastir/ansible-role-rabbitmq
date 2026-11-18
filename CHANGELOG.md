@@ -1,5 +1,13 @@
 # Changelog
 
+## 2.1.3 — 2026-11
+
+### Fixed
+- `rabbitmq.conf` / `rabbitmq-env.conf`: the header was written as `# {{ ansible_managed }}`, which comments only the
+  first line. With a multi-line `ansible_managed` the following lines ended up as configuration (in
+  `rabbitmq-env.conf` they are executed by the shell and broke the service start). The header now uses
+  `ansible_managed | comment`, like the other templates.
+
 ## 2.1.2 — 2026-11
 
 ### Fixed

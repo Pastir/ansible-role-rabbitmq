@@ -1,4 +1,4 @@
-# {{ ansible_managed }}
+{{ ansible_managed | comment }}
 {% for key, value in rabbitmq_conf | dictsort %}
 {{ key }} = {{ value | string | lower if value is boolean else value }}
 {% endfor %}

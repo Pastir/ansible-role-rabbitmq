@@ -1,4 +1,4 @@
-# {{ ansible_managed }}
+{{ ansible_managed | comment }}
 {% for key, value in rabbitmq_env | dictsort %}
 {{ key }}={{ value }}
 {% endfor %}
